@@ -28,7 +28,7 @@ class DummyCameraPublisher(Node):
         self.index = 0
         self.timer = self.create_timer(1.0 / publish_rate, self.timer_callback)\
         # CameraInfo publisher setup
-        self.camera_info_pub = self.create_publisher(CameraInfo, "/camera/camera_info", 10)
+        self.camera_info_pub = self.create_publisher(CameraInfo, "/camera/camera_info", 1)
         # Camera intrinsic matrix (K)
         self.K = [2800.0, 0.0, 2016.0,
               0.0, 2800.0, 1512.0,
@@ -63,7 +63,7 @@ class DummyCameraPublisher(Node):
              self.K[3], self.K[4], self.K[5], 0.0,
              self.K[6], self.K[7], self.K[8], 0.0]
         cam_msg.distortion_model = "plumb_bob"
-        self.camera_info_pub.publish(msg)
+        self.camera_info_pub.publish(cam_msg)
 
 def main():
     rclpy.init()

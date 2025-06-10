@@ -4,18 +4,28 @@ from launch_ros.actions import Node
 def generate_launch_description():
     return LaunchDescription([
         Node(
-            package='usb_cam',
-            executable='usb_cam_node_exe',
+            package='apriltag_ros',
+            executable='apriltag_node',
+            name='apriltag_detector',
             output='screen',
             parameters=[{
-                'video_device': '/dev/video2',          # Confirm device path
-                'image_width': 1280,                    # Max UVC width for ZED 2i
-                'image_height': 720,                    # Max UVC height
-                'framerate': 30.0,                       # FPS
-                'auto_focus': False,
-                'pixel_format': 'yuyv',                 # Common UVC format
-                'camera_name': 'zed2i',                 # Camera frame ID
-                'brightness': 50,                       # Adjust as needed (0-100)
-            }]
+                'image_transport': 'raw',
+                'family': '36h11',
+                'size': 1.2,
+                'max_hamming': 0,
+
+                'detector.threads': 4,
+                'detector.decimate': 2.0,
+                'detector.blur': 0.0,
+                'detector.refine': True,
+                'detector.sharpening': 0.25,
+                'detector.debug': False,
+
+                'pose_estimation_method': 'pnp',
+            }],
+            remappings=[
+                ('image_rect', '/camera/image_raw'),
+                ('camera_info', '/camera/camera_info'),
+            ]
         )
     ])
