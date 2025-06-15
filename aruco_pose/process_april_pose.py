@@ -7,7 +7,8 @@ from rclpy.duration import Duration
 
 from apriltag_msgs.msg import AprilTagDetectionArray
 from geometry_msgs.msg import PoseStamped, Pose
-from tf2_ros import Buffer, TransformListener, LookupException, ConnectivityException, ExtrapolationException
+from tf2_ros import Buffer, TransformListener, LookupException, ConnectivityException, ExtrapolationException, TransformBroadcaster
+from geometry_msgs.msg import TransformStamped
 
 from scipy.linalg import svd
 from scipy.spatial.transform import Rotation
@@ -34,7 +35,7 @@ class MultiTfPoseListener(Node):
     def __init__(self, parent_frame: str, child_frames: list):
         super().__init__('multi_tf_pose_listener')
 
-        self.declare_parameter('config_file', 'config/tag_poses.yaml')
+        self.declare_parameter('config_file', '/home/ws/src/aruco_pose/config/tag_poses.yaml')
         self.config_file = self.get_parameter('config_file').get_parameter_value().string_value
 
         self.known_tag_poses = self.load_config(self.config_file)
@@ -45,6 +46,7 @@ class MultiTfPoseListener(Node):
 
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self)
+        self.tf_broadcaster = TransformBroadcaster(self)
 
         self.timer = self.create_timer(1.0, self.timer_callback)
         
@@ -83,17 +85,47 @@ class MultiTfPoseListener(Node):
             self.get_logger().warn(f"Transform from '{self.parent_frame}' to '{child_frame}' not available: {e}")
             return None
         
-    def publish_camera_frame(self):
+    def publish_camera_tf(self):
         P = np.zeros((len(self.known_tag_detect), 3))
         Q = np.zeros((len(self.known_tag_detect), 3))
         i = 0
         for k, p in self.known_tag_detect.items():
             q = self.known_tag_poses[k]
-            P[i] = p
-            Q[i] = q
+            p = PoseStamped()
+            P[i] = np.array([p.pose.position.x, p.pose.position.y, p.pose.position.z])
+            Q[i] = q[:3, 3]
             i += 1
-        R, t, rms = self.kabsch_numpy(P, Q)
-        
+        R, t, rms = self.kabsch_numpy(Q, P)
+        self.publish_tf(R, t)
+        return
+    
+    
+    def publish_tf(self, R, tr):
+        t = TransformStamped()
+
+        # Read message content and assign it to
+        # corresponding tf variables
+        t.header.stamp = self.get_clock().now().to_msg()
+        t.header.frame_id = 'map'
+        t.child_frame_id = self.parent_frame
+
+        # Turtle only exists in 2D, thus we get x and y translation
+        # coordinates from the message and set the z coordinate to 0
+        t.transform.translation.x = tr[0]
+        t.transform.translation.y = tr[1]
+        t.transform.translation.z = tr[2]
+
+        # For the same reason, turtle can only rotate around one axis
+        # and this why we set rotation in x and y to 0 and obtain
+        # rotation in z axis from the message
+        q = Rotation.from_matrix(R).as_quat()
+        t.transform.rotation.x = q[0]
+        t.transform.rotation.y = q[1]
+        t.transform.rotation.z = q[2]
+        t.transform.rotation.w = q[3]
+
+        # Send the transformation
+        self.tf_broadcaster.sendTransform(t)
         return
     
     @staticmethod
@@ -145,6 +177,9 @@ class MultiTfPoseListener(Node):
             child_pose = self.get_pose_child(child_frame)
             if child_pose is not None:
                 self.known_tag_detect[int(child_frame[-1])] = child_pose
+        
+        self.publish_camera_tf()
+        return
         
         
 def main(args=None):
