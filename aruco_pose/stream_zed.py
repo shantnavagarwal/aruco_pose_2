@@ -10,12 +10,10 @@ import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
+from sensor_msgs.msg import CameraInfo
 
 def download_calibration_file(serial_number) :
-    if os.name == 'nt' :
-        hidden_path = os.getenv('APPDATA') + '\\Stereolabs\\settings\\'
-    else :
-        hidden_path = '/home/ws/data/zed/'
+    hidden_path = '/home/ws/src/aruco_pose/config/'
     calibration_file = hidden_path + 'SN' + str(serial_number) + '.conf'
 
     if os.path.isfile(calibration_file) == False:
@@ -125,10 +123,12 @@ class ZedStereoPublisher(Node):
         super().__init__('zed_stereo_publisher')
         
         # Create publishers for left and right images
-        self.left_pub = self.create_publisher(Image, '/zed/left/image_rect', 10)
-        self.right_pub = self.create_publisher(Image, '/zed/right/image_rect', 10)
-        self.left_raw_pub = self.create_publisher(Image, '/zed/left/image_raw', 10)
-        self.right_raw_pub = self.create_publisher(Image, '/zed/right/image_raw', 10)
+        self.left_pub = self.create_publisher(Image, '/zed/left/image_rect', 1)
+        self.right_pub = self.create_publisher(Image, '/zed/right/image_rect', 1)
+        self.left_raw_pub = self.create_publisher(Image, '/zed/left/image_raw', 1)
+        self.right_raw_pub = self.create_publisher(Image, '/zed/right/image_raw', 1)
+        self.left_camera_info_pub = self.create_publisher(CameraInfo, "/zed/left/camera_info", 1)
+        self.right_camera_info_pub = self.create_publisher(CameraInfo, "/zed/right/camera_info", 1)
         
         # Create CV bridge
         self.bridge = CvBridge()
@@ -138,7 +138,7 @@ class ZedStereoPublisher(Node):
             sys.exit(1)
 
         # Open the ZED camera
-        self.cap = cv2.VideoCapture('/dev/video2')
+        self.cap = cv2.VideoCapture('/dev/video0')
         if not self.cap.isOpened():
             self.get_logger().error('Failed to open ZED camera')
             sys.exit(-1)
@@ -146,6 +146,10 @@ class ZedStereoPublisher(Node):
         self.image_size = Resolution()
         # self.image_size.width = 1280
         # self.image_size.height = 720
+                # Camera intrinsic matrix (K)
+        self.K = [1070.0, 0.0, 960.0,
+                    0.0, 1070.0, 540.0,
+                    0.0, 0.0, 1.0]
 
         # Set the video resolution to HD720
         self.cap.set(cv2.CAP_PROP_FRAME_WIDTH, self.image_size.width*2)
@@ -163,7 +167,24 @@ class ZedStereoPublisher(Node):
 
         # Create a timer for publishing images at 30Hz
         self.timer = self.create_timer(1.0/30.0, self.timer_callback)
-
+    
+    def camera_info_msg(self, msg: Image):
+        cam_msg = CameraInfo()
+        cam_msg.header.stamp = msg.header.stamp
+        cam_msg.header.frame_id = msg.header.frame_id
+        cam_msg.width = self.image_size.width
+        cam_msg.height = self.image_size.height
+        cam_msg.k = self.K
+        cam_msg.d = []
+        cam_msg.r = [1.0, 0.0, 0.0,
+             0.0, 1.0, 0.0,
+             0.0, 0.0, 1.0]
+        cam_msg.p = [self.K[0], self.K[1], self.K[2], 0.0,
+             self.K[3], self.K[4], self.K[5], 0.0,
+             self.K[6], self.K[7], self.K[8], 0.0]
+        cam_msg.distortion_model = "plumb_bob"
+        return cam_msg
+    
     def timer_callback(self):
         # Get a new frame from camera
         retval, frame = self.cap.read()
@@ -195,8 +216,14 @@ class ZedStereoPublisher(Node):
             right_msg = self.bridge.cv2_to_imgmsg(right_rect, encoding="bgr8")
             left_msg.header.stamp = self.get_clock().now().to_msg()
             right_msg.header.stamp = left_msg.header.stamp
+            left_msg.header.frame_id = "zed_ceiling"
+            right_msg.header.frame_id = left_msg.header.frame_id
             self.left_pub.publish(left_msg)
+            self.left_camera_info_pub.publish(self.camera_info_msg(left_msg))
+            
             self.right_pub.publish(right_msg)
+            self.right_camera_info_pub.publish(self.camera_info_msg(right_msg))
+            
         except Exception as e:
             self.get_logger().error(f"Error converting rectified images: {str(e)}")
 
